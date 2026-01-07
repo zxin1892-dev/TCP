@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ///***************************SR
+=======
+///***************************GO-BACK-N
+>>>>>>> 13b863078d99b556035a114005ca727e4d36fda0
 // **************************** Feng Hong; 2015-12-09*/
 package com.ouc.tcp.test;
 
@@ -51,6 +55,12 @@ public class TCP_Sender extends TCP_Sender_ADT {
         TCP_PACKET packet = new TCP_PACKET(header, segment, destinAddr);
         header.setTh_sum(CheckSum.computeChkSum(packet));
         packet.setTcpH(header);
+<<<<<<< HEAD
+=======
+        // 3. 发送并缓存
+        udt_send(packet);
+        window.add(packet);
+>>>>>>> 13b863078d99b556035a114005ca727e4d36fda0
         
         //3.创建 SR_Packet 对象
         final SR_Packet srPack = new SR_Packet(packet);
@@ -124,6 +134,9 @@ public class TCP_Sender extends TCP_Sender_ADT {
         waitACK();
     }
 }
+<<<<<<< HEAD
 
 
 
+=======
+>>>>>>> 13b863078d99b556035a114005ca727e4d36fda0
