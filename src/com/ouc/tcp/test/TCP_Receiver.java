@@ -6,19 +6,17 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.TreeMap;
 
 import com.ouc.tcp.client.TCP_Receiver_ADT;
 import com.ouc.tcp.message.*;
 import com.ouc.tcp.tool.TCP_TOOL;
 
 public class TCP_Receiver extends TCP_Receiver_ADT {
-	 private TCP_PACKET ackPack; 
-    private int expectedSeq = 1;       // 期待接收的基序号
-    private int windowSize = 16;       // 接收窗口大小
-    // 接收缓存，自动按序号排序 (Seq -> Data)
-    private TreeMap<Integer, int[]> receiveBuffer = new TreeMap<Integer, int[]>();  
-    
+
+    private TCP_PACKET ackPack;	//回复的ACK报文段
+    int sequence=1;//用于记录当前待接收的包序号，注意包序号不完全是
+    private int lastAck = -1; //新增,用于记录上一个成功接收并返回ACK的序号
+   
     /*构造函数*/
     public TCP_Receiver() {
         super();	//调用超类构造函数
@@ -26,51 +24,48 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
     }
 
     @Override
-    //SR
-public void rdt_recv(TCP_PACKET recvPack) {
-        // 1. 校验和检查
-        if (CheckSum.computeChkSum(recvPack) != recvPack.getTcpH().getTh_sum()) {
-            return; 
-        }
-
-        int currentSeq = recvPack.getTcpH().getTh_seq();
-        int dataLen = recvPack.getTcpS().getData().length;
-
-        // 2. 选择响应逻辑
-        // 情况 A: 落在接收窗口内 [expectedSeq, expectedSeq + N]
-        if (currentSeq >= expectedSeq && currentSeq < expectedSeq + windowSize * dataLen) {
+    //接收到数据报：检查校验和， 检查序号，设置回复的ACK报文段
+    public void rdt_recv(TCP_PACKET recvPack) {
+    	 //1.检查校验码
+        if(CheckSum.computeChkSum(recvPack) == recvPack.getTcpH().getTh_sum()) {
+            int currentSeq = recvPack.getTcpH().getTh_seq();
             
-            // 无论是否是 expected，只要在窗口内，就回发该包的 ACK (SR 特点：逐个确认)
-            sendAck(currentSeq, recvPack);
+            //2.检查是否是期望的序号
+            if (currentSeq == sequence) {
+                //正确的新分组
+                tcpH.setTh_ack(currentSeq);
+                lastAck = currentSeq; //记录当前成功的序号为 lastAck
+                
+                ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
+                tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
+                reply(ackPack);
 
-            // 存入缓存
-            if (!receiveBuffer.containsKey(currentSeq)) {
-                receiveBuffer.put(currentSeq, recvPack.getTcpS().getData());
+                dataQueue.add(recvPack.getTcpS().getData());
+                sequence += recvPack.getTcpS().getData().length; 
+                
+                System.out.println("接收到新分组: " + currentSeq + ", 下一个期望: " + sequence);
+            } else {
+                //3.序号不对，回复上一个成功的 lastAck
+                System.out.println("序号不对，回复冗余ACK: " + lastAck);
+                tcpH.setTh_ack(lastAck); 
+                ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
+                tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
+                reply(ackPack);
             }
-
-            // 如果正好是期望的那个包，滑动窗口并交付数据
-            if (currentSeq == expectedSeq) {
-                while (receiveBuffer.containsKey(expectedSeq)) {
-                    int[] data = receiveBuffer.remove(expectedSeq);
-                    dataQueue.add(data);
-                    expectedSeq += data.length;
-                }
-                deliver_data();
-            }
-        } 
-        // 情况 B: 落在 [expectedSeq - window, expectedSeq - 1] 之间
-        // 说明这是之前发过 ACK 但发送方没收到的包，必须重发 ACK，否则发送方会一直重传
-        else if (currentSeq < expectedSeq && currentSeq >= expectedSeq - windowSize * dataLen) {
-            sendAck(currentSeq, recvPack);
+        } else {
+            //什么也不做，等待发送方超时重传
+            //System.out.println("检测到位错，发送冗余ACK: " + lastAck);
+            //tcpH.setTh_ack(lastAck); //回复上一个正确包的序号
+            //ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
+            //tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
+            //reply(ackPack);
         }
+
+
+        if(dataQueue.size() == 20)
+            deliver_data();
     }
     
-private void sendAck(int ackNum, TCP_PACKET recvPack) {
-        tcpH.setTh_ack(ackNum);
-        ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
-        tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
-        reply(ackPack);
-    }
 
     @Override
     //交付数据（将数据写入文件）；不需要修改
