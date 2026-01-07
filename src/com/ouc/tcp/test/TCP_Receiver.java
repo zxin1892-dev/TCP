@@ -14,8 +14,8 @@ import com.ouc.tcp.tool.TCP_TOOL;
 public class TCP_Receiver extends TCP_Receiver_ADT {
 
     private TCP_PACKET ackPack;	//回复的ACK报文段
-    int sequence=1;//用于记录当前待接收的包序号，注意包序号不完全是
-    private int lastAck = -1; //新增,用于记录上一个成功接收并返回ACK的序号
+    int sequence=1;//用于记录当前待接收的包序号
+    private int lastAck = -1; //用于记录上一个成功接收并返回ACK的序号
    
     /*构造函数*/
     public TCP_Receiver() {
@@ -30,11 +30,11 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
         if(CheckSum.computeChkSum(recvPack) == recvPack.getTcpH().getTh_sum()) {
             int currentSeq = recvPack.getTcpH().getTh_seq();
             
-            //2.检查是否是期望的序号
+            //2.检查是否是期望的序号 (GBN 严格按序接收)
             if (currentSeq == sequence) {
-                //正确的新分组
+                // 正确的新分组
                 tcpH.setTh_ack(currentSeq);
-                lastAck = currentSeq; //记录当前成功的序号为 lastAck
+                lastAck = currentSeq; // 更新最后一次成功的 ACK 序号
                 
                 ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
                 tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
@@ -43,26 +43,30 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
                 dataQueue.add(recvPack.getTcpS().getData());
                 sequence += recvPack.getTcpS().getData().length; 
                 
-                System.out.println("接收到新分组: " + currentSeq + ", 下一个期望: " + sequence);
+                System.out.println("按序接收: " + currentSeq + ", 下一个期望: " + sequence);
             } else {
-                //3.序号不对，回复上一个成功的 lastAck
-                System.out.println("序号不对，回复冗余ACK: " + lastAck);
+                // 3. 序号不对（乱序），回复上一个成功的 lastAck (累积确认)
+                System.out.println("序号不对 (期望 " + sequence + " 但收到 " + currentSeq + "), 重发 ACK: " + lastAck);
+                if (lastAck != -1) {
+                    tcpH.setTh_ack(lastAck); 
+                    ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
+                    tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
+                    reply(ackPack);
+                }
+            }
+        } else {
+            // 校验和错误，回复上一个成功的 ACK，触发发送方可能的重传
+            System.out.println("检测到位错，重发 ACK: " + lastAck);
+            if (lastAck != -1) {
                 tcpH.setTh_ack(lastAck); 
                 ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
                 tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
                 reply(ackPack);
             }
-        } else {
-            //什么也不做，等待发送方超时重传
-            //System.out.println("检测到位错，发送冗余ACK: " + lastAck);
-            //tcpH.setTh_ack(lastAck); //回复上一个正确包的序号
-            //ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
-            //tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
-            //reply(ackPack);
         }
 
 
-        if(dataQueue.size() == 20)
+        if(dataQueue.size() >= 20)
             deliver_data();
     }
     
@@ -99,7 +103,7 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
     //回复ACK报文段
     public void reply(TCP_PACKET replyPack) {
         //设置错误控制标志
-        tcpH.setTh_eflag((byte)4);	//eFlag=4，通道可能会出错，丢包或延迟
+        tcpH.setTh_eflag((byte)4);	//eFlag=4
         //发送数据报
         client.send(replyPack);
     }
