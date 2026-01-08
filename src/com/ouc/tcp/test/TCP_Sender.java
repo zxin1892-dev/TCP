@@ -30,6 +30,7 @@ public class TCP_Sender extends TCP_Sender_ADT {
     private int dupAckCount = 0;        // 重复ACK计数器
     private int lastAck = -1;           // 上一次收到的累积确认序号
     private int singleDataSize = 100;
+    private int ackCount = 0; //拥塞避免阶段计算
  // 缓存已发送但尚未确认的包，用于重传
     private Map<Integer, TCP_PACKET> sentSegments = new TreeMap<Integer, TCP_PACKET>();
     
@@ -48,6 +49,7 @@ public class TCP_Sender extends TCP_Sender_ADT {
                 // Tahoe 超时动作
                 int oldSsthresh = ssthresh;
                 ssthresh = Math.max((int)cwnd / 2, 2);
+                ackCount = 0; 
                 System.out.println("ssthresh 调整: " + oldSsthresh + " -> " + ssthresh);
                 System.out.println("cwnd " + (int)cwnd + " -> 1\n");
                 
@@ -145,10 +147,13 @@ public class TCP_Sender extends TCP_Sender_ADT {
                 cwnd += 1.0f;
                 System.out.println("cwnd " + oldCwnd + " -> " + (int)cwnd);
             } else {
-                // 拥塞避免：每收到一个新ACK，增加 1/cwnd
-                cwnd += 1.0f / oldCwnd;
+                // 拥塞避免：每收到一个新ACK，计数加 1
+            	   ackCount++;
                 // 只有当整数部分发生变化时才打印，或者按你的截图每确认一个包就打印浮点转整数的结果
-                if ((int)cwnd > oldCwnd) {
+                if (ackCount>= oldCwnd) {
+
+                    cwnd += 1.0f;
+                    ackCount = 0; // 重置计数器
                     System.out.println("cwnd " + oldCwnd + " -> " + (int)cwnd + "\n");
                 }
             }
@@ -178,6 +183,8 @@ public class TCP_Sender extends TCP_Sender_ADT {
                 int oldSsthresh = ssthresh;
                 ssthresh = Math.max((int)cwnd / 2, 2);
                 cwnd = 1.0f;// Tahoe 特色：快重传后立即回到 cwnd=1
+                ackCount = 0; // 清空拥塞避免计数器，防止状态污染
+                
                 System.out.println("cwnd " + oldCwnd + " -> 1");
                 System.out.println("ssthresh 调整: " + oldSsthresh + " -> " + ssthresh + "\n");
                 
