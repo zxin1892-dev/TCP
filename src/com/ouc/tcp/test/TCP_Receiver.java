@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/***************************SR*****************/
-=======
 /***************************GO-BACK-N*****************/
->>>>>>> 13b863078d99b556035a114005ca727e4d36fda0
 /***** Feng Hong; 2015-12-09******************************/
 package com.ouc.tcp.test;
 
@@ -25,7 +21,7 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
     
     private Map<Integer, int[]> recvBuffer = new TreeMap<Integer, int[]>(); //缓存乱序包
     private int rcv_base = 1; //接收窗口左边界
-    private int windowSize = 10;
+    private int singleDataSize = 100;
    
     /*构造函数*/
     public TCP_Receiver() {
@@ -37,53 +33,51 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
     public void rdt_recv(TCP_PACKET recvPack) {
         // 1. 检查校验码
         if (CheckSum.computeChkSum(recvPack) != recvPack.getTcpH().getTh_sum()) {
-            System.out.println("检测到位错，SR 协议直接丢弃，等待发送方超时");
+            System.out.println("检测到位错，丢弃该包");
             return; 
         }
 
         int currentSeq = recvPack.getTcpH().getTh_seq();
         int dataLen = recvPack.getTcpS().getData().length;
 
-        //2.逻辑判断：SR接收窗口范围是 [rcv_base, rcv_base+N-1]
-        //情况 1：序号在接收窗口内[rcv_base, rcv_base+windowSize)
-        if (currentSeq >= rcv_base && currentSeq < rcv_base + windowSize * dataLen) {
+        // 2. 处理报文
+        if (currentSeq == rcv_base) {
+            // --- 情况 A：收到的正是期待的按序包 ---
+            System.out.println("收到按序包，序号: " + currentSeq);
             
-            //无论是否是期望的rcv_base，只要在窗口内，就必须发送对应序号的独立 ACK
-            tcpH.setTh_ack(currentSeq); 
-            ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
-            tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
-            reply(ackPack);
-            System.out.println("窗口内接收，发送独立 ACK: " + currentSeq);
-
-            //如果该包还没在缓存里，则存入缓存
+            // 放入数据队列（暂存，等待滑动窗口逻辑统一处理）
+            recvBuffer.put(currentSeq, recvPack.getTcpS().getData());
+            
+            // 检查缓存，尝试滑动窗口并交付连续数据
+            while (recvBuffer.containsKey(rcv_base)) {
+                int[] data = recvBuffer.remove(rcv_base);
+                dataQueue.add(data);
+                //lastAck为当前按序收到的最高包序号
+                lastAck = rcv_base; 
+                rcv_base += data.length; // 增加期待的下一个序号
+                System.out.println("交付数据，rcv_base 推进至: " + rcv_base);
+            }
+        } else if (currentSeq > rcv_base) {
+            // --- 情况 B：收到乱序包（序号跳跃） ---
+            System.out.println("收到乱序包: " + currentSeq + "，期待: " + rcv_base + "。放入缓存。");
             if (!recvBuffer.containsKey(currentSeq)) {
                 recvBuffer.put(currentSeq, recvPack.getTcpS().getData());
             }
-
-            //如果收到的正是窗口左边界 (rcv_base)，则可以滑动窗口
-            if (currentSeq == rcv_base) {
-                //循环检查缓存，交付连续的数据包
-                while (recvBuffer.containsKey(rcv_base)) {
-                    int[] data = recvBuffer.remove(rcv_base);
-                    dataQueue.add(data);
-                    rcv_base += data.length; //滑动接收窗口左边界
-                    System.out.println("交付数据，rcv_base 推进至: " + rcv_base);
-                }
-            }
-        } 
-        //情况2：序号在[rcv_base-N, rcv_base-1]之间
-        //这说明该包之前收过，但发送方可能没收到ACK，所以必须重发该包的独立ACK
-        else if (currentSeq >= rcv_base - windowSize * dataLen && currentSeq < rcv_base) {
-            tcpH.setTh_ack(currentSeq);
-            ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
-            tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
-            reply(ackPack);
-            System.out.println("收到已确认过的老包，重发独立 ACK: " + currentSeq);
-        } 
-        //情况 3：其他序号（超出窗口范围），直接忽略
-        else {
-            System.out.println("收到超出窗口范围的包: " + currentSeq + "，忽略");
+            //乱序时不更新 lastAck，稍后回复的依然是旧的 lastAck
+        } else {
+            // --- 情况 C：收到重复的老包 (currentSeq < rcv_base) ---
+            System.out.println("收到重复包: " + currentSeq + "，忽略数据，仅重发 ACK");
         }
+
+        // 3. 发送累计确认 (Cumulative ACK)
+        // 无论收到的是哪种情况，都必须回复当前期待的序号 rcv_base
+        tcpH.setTh_ack(lastAck); 
+        
+        ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
+        tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
+        reply(ackPack);
+        
+        System.out.println("发送累计确认，ACK 序号: " + lastAck);
 
         // 交付应用层
         if(dataQueue.size() >= 20)
@@ -122,7 +116,7 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
     @Override
     //回复ACK报文段
     public void reply(TCP_PACKET replyPack) {
-        //设置错误控制标志
+    	//设置错误控制标志
         tcpH.setTh_eflag((byte)7);	//eFlag=7
         //发送数据报
         client.send(replyPack);
