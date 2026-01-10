@@ -25,7 +25,7 @@ public class TCP_Sender extends TCP_Sender_ADT {
     //private int windowSize = 10;
     // 修改 window 存储的对象为 SR_Packet
     //private List<SR_Packet> window = Collections.synchronizedList(new ArrayList<SR_Packet>());
- // tcp-tahoe--- 新增 ---
+ // tcp-tahoe新增
     private float cwnd = 1.0f;          //拥塞窗口，初始为1
     private int ssthresh = 16;          //门限值 (以报文段个数为单位)
     private int dupAckCount = 0;        //重复ACK计数器
@@ -77,11 +77,11 @@ public class TCP_Sender extends TCP_Sender_ADT {
             try { Thread.sleep(5); } catch (Exception e) {}
         }
         
-        // 2. 深度复制 Header 和 Segment，防止引用污染
-        // 必须为每个包创建独立的 Header 和 Segment 对象
+        //2.深度复制 Header和 Segment，防止引用污染
+        //必须为每个包创建独立的Header和Segment对象
         TCP_HEADER header = new TCP_HEADER();
         header.setTh_seq(nextSeqNum);
-        header.setTh_eflag((byte)7); // 设置错误控制标志       
+        header.setTh_eflag((byte)7); //设置错误控制标志       
         TCP_SEGMENT segment = new TCP_SEGMENT();
         segment.setData(appData);        
         TCP_PACKET packet = new TCP_PACKET(header, segment, destinAddr);
@@ -101,47 +101,35 @@ public class TCP_Sender extends TCP_Sender_ADT {
         nextSeqNum += appData.length;
     }
 
-
-
     @Override
     public void udt_send(TCP_PACKET stcpPack) {
         stcpPack.getTcpH().setTh_eflag((byte)7);
         client.send(stcpPack);
     }
-    //Tahoe 采用 累计确认
+    //Tahoe采用累计确认
     @Override
     public void waitACK() {
         if (ackQueue.isEmpty()) return;
         int currentAck = ackQueue.poll();
         
-        // 记录旧的 cwnd 用于日志打印
+        //记录旧的cwnd用于日志打印
         int oldCwnd = (int)cwnd;
 
-        // Tahoe 累计确认逻辑：currentAck是接收方收到的最高序号
+        //Tahoe累计确认逻辑：currentAck是接收方收到的最高序号
         if (currentAck >=base) {
-            // --- A. 收到新的有效确认 ---
+            //A.收到新的有效确认
             // 收到新确认
             System.out.println("Receive ACK Number: " + currentAck);
             
-            // 滑动窗口：移除所有 <= currentAck 的包
+            //1.滑动窗口：移除所有<=currentAck的包
             for (int i = base; i <= currentAck; i += singleDataSize) {
                 sentSegments.remove(i);
             }
+      
+            //2.更新base
+            base = currentAck+ singleDataSize; //更新base为期待的下一个
             
-            base = currentAck + singleDataSize; // 更新 base 为期待的下一个
-//            // 1. 滑动窗口：移除所有序号小于 currentAck 的已确认包
-//            synchronized (sentSegments) {
-//                java.util.Iterator<Integer> it = sentSegments.keySet().iterator();
-//                while (it.hasNext()) {
-//                    if (it.next() < currentAck) it.remove();
-//                    else break;
-//                }
-//            }
-            
-            // 2. 更新 base
-            base = currentAck+ singleDataSize; // 更新 base 为期待的下一个
-            
-            // 3. 拥塞窗口调整 (Tahoe 逻辑)
+            //3.拥塞窗口调整 (Tahoe逻辑)
             if (cwnd < ssthresh) {
                 //慢开始：每收到一个新ACK，cwnd + 1
                 cwnd += 1.0f;
@@ -152,19 +140,16 @@ public class TCP_Sender extends TCP_Sender_ADT {
                 //只有当整数部分发生变化时才打印
                 if (ackCount>= oldCwnd) {
                     cwnd += 1.0f;
-                    ackCount = 0; // 重置计数器
+                    ackCount = 0; //重置计数器
                     System.out.println("cwnd " + oldCwnd + " -> " + (int)cwnd + "\n");
                 }
             }
-
-           
-            
-            
-            // 4. 重置重复计数
+          
+            //4.重置重复计数
             dupAckCount = 0;
             lastAck = currentAck;
 
-            // 5. 计时器管理：如果还有没确认的包，重启计时器；否则停止
+            //5.计时器管理：如果还有没确认的包，重启计时器；否则停止
             if (base < nextSeqNum) {
                 startTimer();
             } else {
@@ -179,9 +164,9 @@ public class TCP_Sender extends TCP_Sender_ADT {
              // 打印 ssthresh 调整信息
                 int oldSsthresh = ssthresh;
                 ssthresh = Math.max((int)cwnd / 2, 2);
-                cwnd = 1.0f;//Tahoe，快重传后立即回到 cwnd=1
+                cwnd = (float)ssthresh;//Reno，快重传后cwnd=ssthresh
                 ackCount = 0; //清空拥塞避免计数器，防止状态污染      
-                System.out.println("cwnd " + oldCwnd + " -> 1");
+                System.out.println("cwnd " + oldCwnd + " -> "+ ssthresh);
                 System.out.println("ssthresh 调整: " + oldSsthresh + " -> " + ssthresh + "\n");
                 //快重传：立即发送base处的包
                 if (sentSegments.containsKey(base)) {
