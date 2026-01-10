@@ -42,37 +42,33 @@ public class TCP_Receiver extends TCP_Receiver_ADT {
 
         // 2. 处理报文
         if (currentSeq == rcv_base) {
-            // --- 情况 A：收到的正是期待的按序包 ---
+            //情况 A：收到的正是期待的按序包
             System.out.println("收到按序包，序号: " + currentSeq);
-            
-            // 放入数据队列（暂存，等待滑动窗口逻辑统一处理）
+            //放入数据队列（暂存，等待滑动窗口逻辑统一处理）
             recvBuffer.put(currentSeq, recvPack.getTcpS().getData());
-            
-            // 检查缓存，尝试滑动窗口并交付连续数据
+            //检查缓存，尝试滑动窗口并交付连续数据
             while (recvBuffer.containsKey(rcv_base)) {
                 int[] data = recvBuffer.remove(rcv_base);
                 dataQueue.add(data);
                 //lastAck为当前按序收到的最高包序号
                 lastAck = rcv_base; 
-                rcv_base += data.length; // 增加期待的下一个序号
+                rcv_base += data.length; //增加期待的下一个序号
                 System.out.println("交付数据，rcv_base 推进至: " + rcv_base);
             }
         } else if (currentSeq > rcv_base) {
-            // --- 情况 B：收到乱序包（序号跳跃） ---
+            //情况 B：收到乱序包（序号跳跃）
             System.out.println("收到乱序包: " + currentSeq + "，期待: " + rcv_base + "。放入缓存。");
             if (!recvBuffer.containsKey(currentSeq)) {
                 recvBuffer.put(currentSeq, recvPack.getTcpS().getData());
             }
             //乱序时不更新 lastAck，稍后回复的依然是旧的 lastAck
         } else {
-            // --- 情况 C：收到重复的老包 (currentSeq < rcv_base) ---
+            //情况 C：收到重复的老包 (currentSeq < rcv_base)
             System.out.println("收到重复包: " + currentSeq + "，忽略数据，仅重发 ACK");
         }
 
-        // 3. 发送累计确认 (Cumulative ACK)
-        // 无论收到的是哪种情况，都必须回复当前期待的序号 rcv_base
-        tcpH.setTh_ack(lastAck); 
-        
+        //3.发送累计确认
+        tcpH.setTh_ack(lastAck);     
         ackPack = new TCP_PACKET(tcpH, tcpS, recvPack.getSourceAddr());
         tcpH.setTh_sum(CheckSum.computeChkSum(ackPack));
         reply(ackPack);

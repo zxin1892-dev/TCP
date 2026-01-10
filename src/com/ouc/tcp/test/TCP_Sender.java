@@ -17,7 +17,8 @@ import java.util.TreeMap;
 public class TCP_Sender extends TCP_Sender_ADT {
 
     private UDT_Timer timer;
-    
+
+    private boolean isFastRecovery = false; //是否处于快恢复阶段
     //GBN 核心变量
     private int base = 1;
     private int nextSeqNum = 1;
@@ -25,10 +26,10 @@ public class TCP_Sender extends TCP_Sender_ADT {
     // 修改 window 存储的对象为 SR_Packet
     //private List<SR_Packet> window = Collections.synchronizedList(new ArrayList<SR_Packet>());
  // tcp-tahoe--- 新增 ---
-    private float cwnd = 1.0f;          // 拥塞窗口，初始为1
-    private int ssthresh = 16;          // 门限值 (以报文段个数为单位)
-    private int dupAckCount = 0;        // 重复ACK计数器
-    private int lastAck = -1;           // 上一次收到的累积确认序号
+    private float cwnd = 1.0f;          //拥塞窗口，初始为1
+    private int ssthresh = 16;          //门限值 (以报文段个数为单位)
+    private int dupAckCount = 0;        //重复ACK计数器
+    private int lastAck = -1;           //上一次收到的累积确认序号
     private int singleDataSize = 100;
     private int ackCount = 0; //拥塞避免阶段计算
  // 缓存已发送但尚未确认的包，用于重传
@@ -49,10 +50,9 @@ public class TCP_Sender extends TCP_Sender_ADT {
                 // Tahoe 超时动作
                 int oldSsthresh = ssthresh;
                 ssthresh = Math.max((int)cwnd / 2, 2);
-                ackCount = 0; 
+                ackCount = 0;
                 System.out.println("ssthresh 调整: " + oldSsthresh + " -> " + ssthresh);
-                System.out.println("cwnd " + (int)cwnd + " -> 1\n");
-                
+                System.out.println("cwnd " + (int)cwnd + " -> 1\n");               
                 cwnd = 1.0f;
                 dupAckCount = 0;
                 
@@ -63,7 +63,7 @@ public class TCP_Sender extends TCP_Sender_ADT {
                 startTimer(); // 递归重设计时器
             }
         };
-        timer.schedule(task, 1000, 1000);
+        timer.schedule(task, 3000, 3000);
     }
     
     @Override
@@ -72,7 +72,7 @@ public class TCP_Sender extends TCP_Sender_ADT {
     	 // 1. 检查拥塞窗口是否允许发送
         // (int)cwnd 将浮点数转为整数报文个数
         while (nextSeqNum >= base + (int)cwnd * dataLen) {
-            // 窗口已满，等待 (在真实系统是阻塞，模拟器中通常是等待下一次调用)
+            //窗口已满，等待 
             System.out.println("窗口已满，等待中... cwnd: " + cwnd);
             try { Thread.sleep(5); } catch (Exception e) {}
         }
@@ -143,15 +143,14 @@ public class TCP_Sender extends TCP_Sender_ADT {
             
             // 3. 拥塞窗口调整 (Tahoe 逻辑)
             if (cwnd < ssthresh) {
-                // 慢启动：每收到一个新ACK，cwnd + 1
+                //慢开始：每收到一个新ACK，cwnd + 1
                 cwnd += 1.0f;
                 System.out.println("cwnd " + oldCwnd + " -> " + (int)cwnd);
             } else {
-                // 拥塞避免：每收到一个新ACK，计数加 1
+                //拥塞避免：每收到一个新ACK，计数加 1
             	   ackCount++;
-                // 只有当整数部分发生变化时才打印，或者按你的截图每确认一个包就打印浮点转整数的结果
+                //只有当整数部分发生变化时才打印
                 if (ackCount>= oldCwnd) {
-
                     cwnd += 1.0f;
                     ackCount = 0; // 重置计数器
                     System.out.println("cwnd " + oldCwnd + " -> " + (int)cwnd + "\n");
@@ -173,22 +172,18 @@ public class TCP_Sender extends TCP_Sender_ADT {
             }
 
         } else if (currentAck == lastAck&& currentAck != -1) {
-            // --- B. 收到重复确认 ---
+            //B.收到重复确认
             dupAckCount++;
             if (dupAckCount == 3) {
-                System.out.println("检测到3次重复ACK，触发 Tahoe 快重传！序号: " + base);
-                // Tahoe 特有动作：门限减半，窗口设为 1
-                
+                System.out.println("检测到3次重复ACK，触发 Tahoe 快重传！序号: " + base);           
              // 打印 ssthresh 调整信息
                 int oldSsthresh = ssthresh;
                 ssthresh = Math.max((int)cwnd / 2, 2);
-                cwnd = 1.0f;// Tahoe 特色：快重传后立即回到 cwnd=1
-                ackCount = 0; // 清空拥塞避免计数器，防止状态污染
-                
+                cwnd = 1.0f;//Tahoe，快重传后立即回到 cwnd=1
+                ackCount = 0; //清空拥塞避免计数器，防止状态污染      
                 System.out.println("cwnd " + oldCwnd + " -> 1");
                 System.out.println("ssthresh 调整: " + oldSsthresh + " -> " + ssthresh + "\n");
-                
-                // 快重传：立即发送 base 处的包
+                //快重传：立即发送base处的包
                 if (sentSegments.containsKey(base)) {
                     udt_send(sentSegments.get(base));
                     startTimer(); // 重传后重新计时
